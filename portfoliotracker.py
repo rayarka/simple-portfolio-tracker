@@ -1,59 +1,90 @@
-# v0.1 - Very minimal, single stock, no analysis.
+# v0.2 - Largely Minimal, but can deal with multiple stocks directly from a csv where you only have to list down how many shares of stock you bought that day
 
 """Currently, usage is simple: under `ticker`, `startDate` and `endDate` below, you enter the 1 ticker in your portfolio. 
 Separately, ensure that `holdings.csv` file contains how much you added to your ticker holdings and on what date. Then a graph is produced."""
 
 import yfinance as yf
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 import pandas as pd
 from matplotlib import pyplot as plt
 
-#Enter Ticker and Dates
-ticker = "QQQM"
-startDate = "2021-09-15"
-endDate = "2022-01-13"
-
-def convert_date_to_correct_format(date):
-    dateofint = datetime.strptime(date, '%Y-%m-%d')
-    print(f"Date = {dateofint}")
-    print(f"Weekday Number: {dateofint.weekday()}")
-    if(dateofint.weekday() > 4):
-        print(f"Is a Weekdend")
-#         dateofint = dateofint - timedelta(days=2)
-    return dateofint
-
-startDate = convert_date_to_correct_format(startDate)
-endDate = convert_date_to_correct_format(endDate)
-
-tickerObject = yf.Ticker(ticker)
-data = tickerObject.history(start=startDate, end=endDate)
-
-closePricesDf = data['Close']
-closePricesDf.name = ticker
-
-ticker_column_name = ticker + " Holdings"
-
+# Get ticker data from holdings directly and sort 
 holdings = pd.read_csv('holdings.csv', index_col='Date', parse_dates=True, dayfirst=True)
-holdings['cumulative'] = holdings[ticker_column_name].cumsum()
-holdings.drop(columns=[ticker_column_name], inplace = True)
+holdings = holdings.sort_index()
+
+# Get dates from start of holdings to today
+tickers = list(holdings.columns)
+startDate = holdings.index[0]
+endDate = date.today()
 
 holdingUpdateDf = pd.DataFrame(index = pd.date_range(start=startDate, end=endDate))
-holdingUpdateDf = pd.merge(holdingUpdateDf, closePricesDf, how = 'left', left_index=True, right_index=True)
-holdingUpdateDf.head(10)
 
-holdingUpdateDf = holdingUpdateDf.fillna(method="ffill")
+for ticker in tickers:
+    print(ticker)
+    
+    newDf = pd.DataFrame(holdings[ticker])
+    newDf = newDf.rename(columns = {ticker:f'units bought of {ticker}'})
+    newDf[f'cumulative {ticker}'] = newDf[f'units bought of {ticker}'].cumsum()
+    newDf.dropna(inplace = True)
+    newDf = newDf[newDf[f'cumulative {ticker}'] != 0]
+    print('newdf\n',newDf)
+    
+    # Get yfinance data
+    tickerObject = yf.Ticker(ticker)
+    data = tickerObject.history(start=startDate, end=endDate)
+    closePricesDf = data['Close']
+    closePricesDf.name = ticker
+#     print(closePricesDf)
+    
+    holdingUpdateDf = pd.merge(holdingUpdateDf, closePricesDf, how = 'left', left_index=True, right_index=True)
+    holdingUpdateDf = holdingUpdateDf.fillna(method="ffill")
+    
+    holdingUpdateDf = pd.merge(holdingUpdateDf, newDf, how = 'left', left_index=True, right_index=True)
+    holdingUpdateDf[f'cost of {ticker}'] = holdingUpdateDf[ticker] * holdingUpdateDf[f'units bought of {ticker}']
+    holdingUpdateDf[f'total cost of {ticker}'] = holdingUpdateDf[f'cost of {ticker}'].cumsum()
+    holdingUpdateDf[[f'units bought of {ticker}']] = holdingUpdateDf[[f'units bought of {ticker}']].fillna(value=0)
+    holdingUpdateDf = holdingUpdateDf.fillna(method="ffill")
+    holdingUpdateDf = holdingUpdateDf.fillna(value = 0)
+    
+    holdingUpdateDf[f'value of {ticker}'] = holdingUpdateDf[ticker] * holdingUpdateDf[f'cumulative {ticker}']
+    
+holdingUpdateDf  
 
-holdingUpdateDf = pd.merge(holdingUpdateDf, holdings, how = 'left', left_index=True, right_index=True)
-holdingUpdateDf['invested'] = holdingUpdateDf['cumulative'] * holdingUpdateDf[ticker]
-holdingUpdateDf = holdingUpdateDf.fillna(method="ffill")
-holdingUpdateDf = holdingUpdateDf.fillna(0)
+# Show subplot of each investment
+total = len(tickers)
+cols = 2
+# Compute Rows required
+rows = total // cols 
+rows += total % cols
 
-valueDf = holdingUpdateDf.copy()
-valueDf['value'] = valueDf[ticker]*valueDf['cumulative']
+# Create a Position index
+position = range(1, total + 1)
 
-title = f'{ticker}: Value of Holdings & Amount Invested'
-valueDf['value'].plot(label = "value", figsize=(16,8), title = title)
-valueDf['invested'].plot(label = "invested")
+fig = plt.figure(1, figsize=(20,10))
+for k in range(total):
+    ticker = tickers[k]
+    valLabel = f'{ticker} value'
+    invLabel = f'{ticker} invested'
+    ax = fig.add_subplot(rows,cols,position[k])
+    ax.plot(holdingUpdateDf[f'value of {ticker}'], label=valLabel)      # Or whatever you want in the subplot
+    ax.plot(holdingUpdateDf[f'total cost of {ticker}'], label=invLabel)
+    ax.legend()
+    title = f"Value of {ticker} Holdings & Amount Invested"
+    plt.title(title)
+plt.show()
+
+holdingUpdateDf['total invested'] = 0
+holdingUpdateDf['total value'] = 0
+for ticker in tickers:
+    holdingUpdateDf['total invested'] += holdingUpdateDf[f'total cost of {ticker}']
+    holdingUpdateDf['total value'] += holdingUpdateDf[f'value of {ticker}']
+holdingUpdateDf
+
+title = 'Value of Holdings & Amount Invested'
+holdingUpdateDf['total value'].plot(label = "value", figsize=(16,8), title = title)
+holdingUpdateDf['total invested'].plot(label = "invested")
 
 plt.legend()
 plt.show()
+
+holdingUpdateDf.to_csv("holdings_updated.csv")
