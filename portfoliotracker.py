@@ -26,7 +26,7 @@ for ticker in tickers:
     newDf = newDf.rename(columns = {ticker:f'units bought of {ticker}'})
     newDf[f'cumulative {ticker}'] = newDf[f'units bought of {ticker}'].cumsum()
     newDf.dropna(inplace = True)
-    newDf = newDf[newDf[f'cumulative {ticker}'] != 0]
+    # newDf = newDf[newDf[f'cumulative {ticker}'] != 0] # #I had put this for a reason but it results in ignoring investment value when my holdings become zero i.e. i close my position
     print('newdf\n',newDf)
     
     # Get yfinance data
@@ -60,7 +60,7 @@ rows += total % cols
 # Create a Position index
 position = range(1, total + 1)
 
-fig = plt.figure(1, figsize=(20,10))
+fig = plt.figure(1, figsize=(20,20))
 for k in range(total):
     ticker = tickers[k]
     valLabel = f'{ticker} value'
